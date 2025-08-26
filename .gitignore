@@ -1,0 +1,18 @@
+.env
+.venv
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+*.pyw
+*.pyz
+*.pywz
+*.pyzw
+*.pyzwz
+backend.egg-info
+nova.egg-info
+
+# Generated lock files and examples
+locks/
+examples/
+example_locks/
