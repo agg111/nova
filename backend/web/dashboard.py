@@ -7,6 +7,7 @@ import os
 import json
 from datetime import datetime
 from flask import Flask, render_template, jsonify, request, redirect, url_for
+from flask_cors import CORS
 from flask_socketio import SocketIO, emit
 import threading
 import time
@@ -15,6 +16,10 @@ from ..core.lock_manager import LockManager
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.getenv('NOVA_SECRET_KEY', 'dev-secret-key')
+
+# Enable CORS for all routes
+CORS(app, origins=["http://localhost:3000", "http://127.0.0.1:3000"])
+
 socketio = SocketIO(app, cors_allowed_origins="*")
 
 # Global lock manager instance

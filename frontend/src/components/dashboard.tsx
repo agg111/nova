@@ -1,12 +1,14 @@
 "use client"
 
 import { useState } from "react"
-import { Bell, Search, Settings, LayoutDashboard, User, Menu, X, Lock, Users, Monitor, RefreshCw, Trash2, Sun, Moon } from 'lucide-react'
+import { Bell, Search, Settings, LayoutDashboard, User, Menu, X, Lock, Users, Monitor, RefreshCw, Trash2, Sun, Moon, AlertTriangle } from 'lucide-react'
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { useLocks } from "@/hooks/use-locks"
+import { LockInfo } from "@/lib/api"
 
 // Nova Logo Component
 function NovaLogo({ size = "w-6 h-7", innerSize = "w-4.5 h-5.5", theme }: { size?: string; innerSize?: string; theme: "dark" | "light" }) {
@@ -33,44 +35,43 @@ function NovaLogo({ size = "w-6 h-7", innerSize = "w-4.5 h-5.5", theme }: { size
   )
 }
 
-// Mock data for file locks
-const mockFileLocks = [
-  {
-    id: 1,
-    file: "Engine_Assembly.dwg",
-    path: "C:\\Projects\\Engine_Assembly.dwg",
-    user: "John Smith",
-    pid: 2048,
-    computer: "WORKSTATION-01",
-    lockedSince: "1/15/2024, 6:30:00 AM",
-  },
-  {
-    id: 2,
-    file: "Chassis_Design.dwg",
-    path: "D:\\CAD\\Chassis_Design.dwg",
-    user: "Sarah Johnson",
-    pid: 1024,
-    computer: "WORKSTATION-03",
-    lockedSince: "1/15/2024, 5:45:00 AM",
-  },
-  {
-    id: 3,
-    file: "Suspension_System.dwg",
-    path: "E:\\Designs\\Suspension_System.dwg",
-    user: "Mike Chen",
-    pid: 3072,
-    computer: "WORKSTATION-07",
-    lockedSince: "1/15/2024, 4:15:00 AM",
-  },
-]
+// Transform backend lock data to frontend format
+function transformLockData(backendLock: LockInfo) {
+  const fileName = backendLock.file_path.split(/[/\\]/).pop() || backendLock.file_path
+  const lockDate = new Date(backendLock.lock_time)
+  
+  return {
+    id: backendLock.lock_id || backendLock.file_path, // Use lock_id or fall back to file_path
+    file: fileName,
+    path: backendLock.file_path,
+    user: backendLock.user_name,
+    pid: backendLock.process_id || 0,
+    computer: backendLock.computer_name,
+    lockedSince: lockDate.toLocaleString(),
+    file_path: backendLock.file_path, // Keep original for API calls
+  }
+}
 
 export default function Dashboard() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [activeTab, setActiveTab] = useState("dashboard")
   const [theme, setTheme] = useState("dark")
   const [searchQuery, setSearchQuery] = useState("")
-  const [fileLocks, setFileLocks] = useState(mockFileLocks)
-  const [notifications, setNotifications] = useState(3)
+  const [notifications, setNotifications] = useState(0)
+  
+  const {
+    locks,
+    stats,
+    isLoading,
+    error,
+    refreshLocks,
+    refreshStats,
+    handleRemoveLock,
+    handleCleanup,
+  } = useLocks()
+  
+  // Transform backend locks to frontend format
+  const fileLocks = locks.map(transformLockData)
 
   // Filter file locks based on search query
   const filteredFileLocks = fileLocks.filter(
@@ -80,18 +81,28 @@ export default function Dashboard() {
       lock.computer.toLowerCase().includes(searchQuery.toLowerCase()),
   )
 
-  const handleRefresh = () => {
-    // Simulate refresh
-    console.log("[v0] Refreshing file locks...")
+  const handleRefresh = async () => {
+    try {
+      await Promise.all([refreshLocks(), refreshStats()])
+    } catch (err) {
+      console.error('Failed to refresh:', err)
+    }
   }
 
-  const handleCleanup = () => {
-    // Simulate cleanup
-    console.log("[v0] Cleaning up stale locks...")
+  const handleCleanupAction = async () => {
+    try {
+      await handleCleanup(24) // Clean up locks older than 24 hours
+    } catch (err) {
+      console.error('Failed to cleanup:', err)
+    }
   }
 
-  const handleRemoveLock = (id: number) => {
-    setFileLocks((prev) => prev.filter((lock) => lock.id !== id))
+  const handleRemoveLockAction = async (lockData: any) => {
+    try {
+      await handleRemoveLock(lockData.file_path)
+    } catch (err) {
+      console.error('Failed to remove lock:', err)
+    }
   }
 
   const toggleTheme = () => {
@@ -273,6 +284,18 @@ export default function Dashboard() {
           {/* Dashboard Content */}
           <main className="flex-1 overflow-auto p-6">
             <div className="max-w-7xl mx-auto space-y-8">
+              {/* Error Display */}
+              {error && (
+                <Card className="bg-red-50 border-red-200 dark:bg-red-900/20 dark:border-red-800/50">
+                  <CardContent className="pt-6">
+                    <div className="flex items-center space-x-2 text-red-600 dark:text-red-400">
+                      <AlertTriangle className="w-4 h-4" />
+                      <span className="text-sm font-medium">Error: {error}</span>
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+
               {/* Statistics Cards */}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
                 <Card
@@ -290,7 +313,7 @@ export default function Dashboard() {
                   </CardHeader>
                   <CardContent>
                     <div className={`text-2xl font-bold ${theme === "dark" ? "text-white" : "text-slate-900"}`}>
-                      {fileLocks.length}
+                      {isLoading ? '...' : stats?.total_locks || fileLocks.length}
                     </div>
                   </CardContent>
                 </Card>
@@ -310,7 +333,7 @@ export default function Dashboard() {
                   </CardHeader>
                   <CardContent>
                     <div className={`text-2xl font-bold ${theme === "dark" ? "text-white" : "text-slate-900"}`}>
-                      {new Set(fileLocks.map((lock) => lock.user)).size}
+                      {isLoading ? '...' : stats?.unique_users || new Set(fileLocks.map((lock) => lock.user)).size}
                     </div>
                   </CardContent>
                 </Card>
@@ -330,7 +353,7 @@ export default function Dashboard() {
                   </CardHeader>
                   <CardContent>
                     <div className={`text-2xl font-bold ${theme === "dark" ? "text-white" : "text-slate-900"}`}>
-                      {new Set(fileLocks.map((lock) => lock.computer)).size}
+                      {isLoading ? '...' : stats?.unique_computers || new Set(fileLocks.map((lock) => lock.computer)).size}
                     </div>
                   </CardContent>
                 </Card>
@@ -361,25 +384,27 @@ export default function Dashboard() {
                     variant="ghost"
                     size="sm"
                     onClick={handleRefresh}
+                    disabled={isLoading}
                     className={`${
                       theme === "dark"
                         ? "text-slate-400 hover:text-slate-200 border-slate-600/50 hover:bg-slate-800/50"
                         : "text-slate-600 hover:text-slate-800 border-slate-300/50 hover:bg-slate-100/50"
-                    } border backdrop-blur-sm`}
+                    } border backdrop-blur-sm disabled:opacity-50`}
                   >
-                    <RefreshCw className="w-4 h-4 mr-2" />
+                    <RefreshCw className={`w-4 h-4 mr-2 ${isLoading ? 'animate-spin' : ''}`} />
                     Refresh
                   </Button>
 
                   <Button
                     variant="ghost"
                     size="sm"
-                    onClick={handleCleanup}
+                    onClick={handleCleanupAction}
+                    disabled={isLoading}
                     className={`${
                       theme === "dark"
                         ? "text-slate-400 hover:text-slate-200 border-slate-600/50 hover:bg-slate-800/50"
                         : "text-slate-600 hover:text-slate-800 border-slate-300/50 hover:bg-slate-100/50"
-                    } border backdrop-blur-sm`}
+                    } border backdrop-blur-sm disabled:opacity-50`}
                   >
                     <Trash2 className="w-4 h-4 mr-2" />
                     Cleanup Stale Locks
@@ -402,7 +427,12 @@ export default function Dashboard() {
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
-                  {filteredFileLocks.length === 0 ? (
+                  {isLoading ? (
+                    <div className={`text-center py-8 ${theme === "dark" ? "text-slate-400" : "text-slate-600"}`}>
+                      <RefreshCw className="w-6 h-6 animate-spin mx-auto mb-2" />
+                      Loading file locks...
+                    </div>
+                  ) : filteredFileLocks.length === 0 ? (
                     <div className={`text-center py-8 ${theme === "dark" ? "text-slate-400" : "text-slate-600"}`}>
                       {searchQuery ? "No file locks match your search." : "No active file locks."}
                     </div>
@@ -459,8 +489,9 @@ export default function Dashboard() {
                               <Button
                                 variant="destructive"
                                 size="sm"
-                                onClick={() => handleRemoveLock(lock.id)}
-                                className="bg-red-500 hover:bg-red-600 text-white"
+                                onClick={() => handleRemoveLockAction(lock)}
+                                disabled={isLoading}
+                                className="bg-red-500 hover:bg-red-600 text-white disabled:opacity-50"
                               >
                                 Remove Lock
                               </Button>

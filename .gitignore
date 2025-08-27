@@ -16,3 +16,6 @@ nova.egg-info
 locks/
 examples/
 example_locks/
+
+# Deployment files (temporary)
+deployment/
