@@ -1,5 +1,7 @@
 .env
 .venv
+.DS_Store
+.nova_pids
 __pycache__
 *.pyc
 *.pyo
@@ -16,6 +18,6 @@ nova.egg-info
 locks/
 examples/
 example_locks/
-
+frontend/dev.log 
 # Deployment files (temporary)
 deployment/

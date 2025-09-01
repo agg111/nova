@@ -7,6 +7,9 @@ import os
 import sys
 import argparse
 import logging
+import signal
+import time
+import json
 from pathlib import Path
 from typing import Optional
 
@@ -21,50 +24,132 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+def get_pid_file_path():
+    """Get the path for the PID file"""
+    if os.name == 'nt':
+        # Windows: Use temp directory
+        return Path(os.getenv('TEMP', 'C:/temp')) / "nova_monitor.pid"
+    else:
+        # Unix-like: Use /var/run or /tmp
+        return Path("/var/run/nova_monitor.pid") if os.access("/var/run", os.W_OK) else Path("/tmp/nova_monitor.pid")
+
+def is_monitor_running():
+    """Check if Nova monitor is already running"""
+    pid_file = get_pid_file_path()
+    
+    if not pid_file.exists():
+        return False
+    
+    try:
+        with open(pid_file, 'r') as f:
+            pid = int(f.read().strip())
+        
+        # Check if process is actually running
+        if os.name == 'nt':
+            # Windows: Use tasklist
+            import subprocess
+            result = subprocess.run(['tasklist', '/FI', f'PID eq {pid}'], 
+                                 capture_output=True, text=True)
+            return str(pid) in result.stdout
+        else:
+            # Unix-like: Use kill -0
+            try:
+                os.kill(pid, 0)
+                return True
+            except OSError:
+                return False
+                
+    except (ValueError, IOError):
+        return False
+
+def start_background_monitor():
+    """Start Nova monitor in background"""
+    if is_monitor_running():
+        print("❌ Nova monitor is already running")
+        return False
+    
+    # Start the monitor in a new process
+    if os.name == 'nt':
+        # Windows: Use start command
+        import subprocess
+        cmd = [sys.executable, '-m', 'backend.cli.main', 'monitor']
+        subprocess.Popen(cmd, creationflags=subprocess.CREATE_NEW_CONSOLE)
+    else:
+        # Unix-like: Use daemon process
+        import subprocess
+        cmd = [sys.executable, '-m', 'backend.cli.main', 'monitor']
+        subprocess.Popen(cmd, start_new_session=True)
+    
+    # Wait a moment for process to start
+    time.sleep(2)
+    
+    if is_monitor_running():
+        print("✅ Nova monitor started successfully!")
+        print("   Status: Running in background")
+        print("   PID file: " + str(get_pid_file_path()))
+        print("   Use 'nova status' to check status")
+        print("   Use 'nova stop' to stop monitoring")
+        return True
+    else:
+        print("❌ Nova could not start")
+        print("   Check error logs at: " + str(get_pid_file_path().parent / "nova_error.log"))
+        print("   Try running 'nova monitor' for foreground mode to see errors")
+        return False
+
+def stop_background_monitor():
+    """Stop Nova monitor running in background"""
+    if not is_monitor_running():
+        print("❌ Nova monitor is not running")
+        return False
+    
+    pid_file = get_pid_file_path()
+    
+    try:
+        with open(pid_file, 'r') as f:
+            pid = int(f.read().strip())
+        
+        # Terminate the process
+        if os.name == 'nt':
+            # Windows: Use taskkill
+            import subprocess
+            subprocess.run(['taskkill', '/PID', str(pid), '/F'], 
+                         capture_output=True)
+        else:
+            # Unix-like: Use kill
+            os.kill(pid, signal.SIGTERM)
+            time.sleep(1)
+            # Force kill if still running
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except OSError:
+                pass
+        
+        # Remove PID file
+        if pid_file.exists():
+            pid_file.unlink()
+        
+        print("✅ Nova monitor stopped")
+        return True
+        
+    except (ValueError, IOError) as e:
+        print(f"❌ Error stopping monitor: {e}")
+        return False
+
 def get_lock_directory():
     """Get the shared lock directory like CADLock"""
     # Check for environment variable first (like CADLock)
     if 'NOVA_LOCKS_DIR' in os.environ:
         lock_dir = Path(os.environ['NOVA_LOCKS_DIR'])
     else:
-        # Default shared locations similar to CADLock
-        if os.name == 'nt':
-            # Windows: Try common shared network locations
-            possible_paths = [
-                r"\\server\shared\Nova\Locks",
-                r"G:\Shared drives\Engineering\Nova\Locks", 
-                r"C:\Shared\Nova\Locks",
-                r"Z:\Nova\Locks"
-            ]
+        # Use platform-appropriate defaults
+        if os.name == 'nt':  # Windows
+            # Use CADLock-compatible location on Windows
+            lock_dir = Path(r"G:\Shared drives\Cosmic\Engineering\50 - CAD Data\NovaLocks")
         else:
-            # Linux/Mac: Network mount locations
-            possible_paths = [
-                "/mnt/shared/nova/locks",
-                "/shared/nova/locks", 
-                "/network/nova/locks"
-            ]
-        
-        # Find first accessible path
-        lock_dir = None
-        for path in possible_paths:
-            test_path = Path(path)
-            try:
-                if test_path.exists() and os.access(test_path, os.W_OK):
-                    lock_dir = test_path
-                    break
-                elif test_path.parent.exists() and os.access(test_path.parent, os.W_OK):
-                    # Parent exists and writable, we can create the locks dir
-                    lock_dir = test_path
-                    break
-            except (PermissionError, OSError):
-                continue
-        
-        # Fallback to local shared directory
-        if lock_dir is None:
-            if os.name == 'nt':
-                lock_dir = Path("C:/Nova/Locks")
-            else:
-                lock_dir = Path("/opt/nova/locks")
+            # On macOS/Linux, use local directory for development/testing
+            # In production, users should set NOVA_LOCKS_DIR to their shared location
+            lock_dir = Path.cwd() / "locks"
+            logger.warning("Using local locks directory for development. Set NOVA_LOCKS_DIR for production.")
     
     # Create directory if it doesn't exist
     try:
@@ -79,8 +164,12 @@ def get_lock_directory():
         
     except (PermissionError, OSError) as e:
         logger.error(f"Failed to create/access lock directory {lock_dir}: {e}")
-        logger.error("Nova requires write access to the shared lock directory for team collaboration")
-        logger.error("Set NOVA_LOCKS_DIR environment variable to a shared network path")
+        if os.name == 'nt':
+            logger.error("On Windows: Ensure G: drive is mapped and accessible")
+            logger.error("Or set NOVA_LOCKS_DIR environment variable to your shared network path")
+        else:
+            logger.error("On macOS/Linux: Set NOVA_LOCKS_DIR environment variable to your shared network path")
+            logger.error("Example: export NOVA_LOCKS_DIR='/mnt/shared/nova-locks'")
         raise SystemExit(f"Cannot initialize Nova lock directory: {e}")
 
 class NovaCLI:
@@ -118,6 +207,25 @@ class NovaCLI:
             print("\nStopping file monitoring...")
             self.file_monitor.stop_monitoring()
             print("File monitoring stopped")
+    
+    def start_background_monitor(self):
+        """Start Nova monitor in background"""
+        return start_background_monitor()
+    
+    def stop_background_monitor(self):
+        """Stop Nova monitor running in background"""
+        return stop_background_monitor()
+    
+    def status(self):
+        """Check if Nova monitor is running"""
+        if is_monitor_running():
+            pid_file = get_pid_file_path()
+            with open(pid_file, 'r') as f:
+                pid = f.read().strip()
+            print(f"✅ Nova monitor is running (PID: {pid})")
+            print(f"   PID file: {pid_file}")
+        else:
+            print("❌ Nova monitor is not running")
     
     def lock_file(self, file_path: str):
         """Manually lock a CAD file"""
@@ -229,13 +337,22 @@ class NovaCLI:
         """Start the web dashboard"""
         lock_directory = get_lock_directory()
         init_dashboard(lock_directory)
-        print(f"Starting Nova dashboard on http://{host}:{port}")
-        print("Press Ctrl+C to stop")
+        print(f"🚀 Starting Nova dashboard...")
+        print(f"   Host: {host}")
+        print(f"   Port: {port}")
+        print(f"   URL: http://localhost:{port}")
+        print(f"   Lock directory: {lock_directory}")
+        print("   Press Ctrl+C to stop")
         
         try:
             start_dashboard(host=host, port=port)
         except KeyboardInterrupt:
-            print("\nDashboard stopped")
+            print("\n🛑 Dashboard stopped")
+        except Exception as e:
+            print(f"\n❌ Dashboard could not start")
+            print(f"   Error: {e}")
+            print(f"   Check if port {port} is available")
+            print(f"   Try a different port: nova dashboard --port 5001")
 
 def main():
     """Main CLI entry point"""
@@ -244,7 +361,16 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Start automatic monitoring 
+  # Start automatic monitoring in background
+  nova start
+  
+  # Check if monitoring is running
+  nova status
+  
+  # Stop background monitoring
+  nova stop
+  
+  # Start foreground monitoring (for debugging)
   nova monitor
   
   # Manually lock a file
@@ -278,6 +404,15 @@ Shared Lock Directory (like CADLock):
     monitor_parser = subparsers.add_parser('monitor', help='Start automatic file monitoring')
     monitor_parser.add_argument('--check-interval', type=float, default=2.0, help='Check interval in seconds')
     
+    # Start command
+    start_parser = subparsers.add_parser('start', help='Start Nova monitor in background')
+    
+    # Stop command
+    stop_parser = subparsers.add_parser('stop', help='Stop Nova monitor running in background')
+    
+    # Status command
+    status_parser = subparsers.add_parser('status', help='Check if Nova monitor is running')
+    
     # Lock command
     lock_parser = subparsers.add_parser('lock', help='Manually lock a CAD file')
     lock_parser.add_argument('file_path', help='Path to the CAD file to lock')
@@ -294,7 +429,7 @@ Shared Lock Directory (like CADLock):
     unlock_all_parser = subparsers.add_parser('unlock-all', help='Unlock all files for current user')
     
     # Cleanup command
-    cleanup_parser = subparsers.add_parser('cleanup', help='Clean up stale locks')
+    cleanup_parser = subparsers.add_parser('cleanup', help='Clean up stale locks - default older than24 hours')
     cleanup_parser.add_argument('--max-age', type=int, default=24, help='Maximum age in hours')
     
     # List command
@@ -319,6 +454,12 @@ Shared Lock Directory (like CADLock):
     try:
         if args.command == 'monitor':
             cli.start_monitor(args.check_interval)
+        elif args.command == 'start':
+            cli.start_background_monitor()
+        elif args.command == 'stop':
+            cli.stop_background_monitor()
+        elif args.command == 'status':
+            cli.status()
         elif args.command == 'lock':
             cli.lock_file(args.file_path)
         elif args.command == 'unlock':

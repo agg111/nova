@@ -16,6 +16,15 @@ from ..core.lock_manager import LockManager
 
 logger = logging.getLogger(__name__)
 
+def get_pid_file_path():
+    """Get the path for the PID file"""
+    if os.name == 'nt':
+        # Windows: Use temp directory
+        return Path(os.getenv('TEMP', 'C:/temp')) / "nova_monitor.pid"
+    else:
+        # Unix-like: Use /var/run or /tmp
+        return Path("/var/run/nova_monitor.pid") if os.access("/var/run", os.W_OK) else Path("/tmp/nova_monitor.pid")
+
 class FileMonitor:
     """Monitors CAD file operations and manages locks automatically"""
     
@@ -34,11 +43,13 @@ class FileMonitor:
         self.check_interval = check_interval
         self.running = False
         self.monitor_thread = None
+        self.pid_file = get_pid_file_path()
         
         # Default CAD processes to monitor
         self.cad_processes = cad_processes or [
-            'SLDWORKS.exe',      # SolidWorks
-            'Inventor.exe',      # Inventor
+            'sldworks.exe',      # SolidWorks
+            'solidworks.exe',      # SolidWorks
+            'inventor.exe',      # Inventor
             'acad.exe',          # AutoCAD
             'proe.exe',          # Pro/Engineer
             'creo.exe',          # Creo
@@ -61,6 +72,15 @@ class FileMonitor:
             logger.warning("File monitor is already running")
             return
         
+        # Create PID file
+        try:
+            self.pid_file.parent.mkdir(parents=True, exist_ok=True)
+            with open(self.pid_file, 'w') as f:
+                f.write(str(os.getpid()))
+            logger.info(f"Created PID file: {self.pid_file}")
+        except Exception as e:
+            logger.error(f"Failed to create PID file: {e}")
+        
         self.running = True
         self.monitor_thread = threading.Thread(target=self._monitor_loop, daemon=True)
         self.monitor_thread.start()
@@ -71,7 +91,32 @@ class FileMonitor:
         self.running = False
         if self.monitor_thread:
             self.monitor_thread.join(timeout=5.0)
+        
+        # Remove PID file
+        try:
+            if self.pid_file.exists():
+                self.pid_file.unlink()
+                logger.info(f"Removed PID file: {self.pid_file}")
+        except Exception as e:
+            logger.error(f"Failed to remove PID file: {e}")
+        
         logger.info("File monitoring stopped")
+    
+    def is_cad_process(self, process_name: str) -> bool:
+        """Check if the given process name is a CAD process (case-insensitive)"""
+        return process_name.lower() in [p.lower() for p in self.cad_processes]
+
+    def is_cad_file(self, file_path: str) -> bool:
+        """Check if the given file path is a CAD file"""
+        return self.lock_manager.is_cad_file(file_path)
+
+    def get_process_files(self, proc) -> List[str]:
+        """Public wrapper around _get_process_files (used in tests)"""
+        return self._get_process_files(proc)
+
+    def is_monitoring(self) -> bool:
+        """Compatibility with tests (alias for self.running)"""
+        return self.running
     
     def _monitor_loop(self):
         """Main monitoring loop"""
@@ -87,9 +132,9 @@ class FileMonitor:
         """Check for CAD processes and their open files"""
         current_process_files = {}
         
-        for proc in psutil.process_iter(['pid', 'name', 'open_files']):
+        for proc in psutil.process_iter(['pid', 'name', 'username', 'open_files']):
             try:
-                if proc.info['name'] in self.cad_processes:
+                if proc.info['name'] and self.is_cad_process(proc.info['name']):
                     pid = proc.info['pid']
                     open_files = self._get_process_files(proc)
                     current_process_files[pid] = open_files
@@ -98,13 +143,13 @@ class FileMonitor:
                     if pid in self.process_files:
                         new_files = set(open_files) - set(self.process_files[pid])
                         for file_path in new_files:
-                            self._handle_file_opened(file_path, pid)
+                            self._handle_file_opened(file_path, pid, proc.info.get("username"))
                     
                     # Check for closed files (files that were tracked but are no longer open)
                     if pid in self.process_files:
                         closed_files = set(self.process_files[pid]) - set(open_files)
                         for file_path in closed_files:
-                            self._handle_file_closed(file_path, pid)
+                            self._handle_file_closed(file_path, pid, proc.info.get("username"))
                             
             except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
                 continue
@@ -130,31 +175,30 @@ class FileMonitor:
         except (psutil.AccessDenied, psutil.NoSuchProcess):
             return []
     
-    def _handle_file_opened(self, file_path: str, process_id: int):
+    def _handle_file_opened(self, file_path: str, process_id: int, username: Optional[str]):
         """Handle when a CAD file is opened"""
         try:
+            effective_user = username or self.user_name
             success, message = self.lock_manager.create_lock(
-                file_path, self.user_name, self.computer_name, process_id
+                file_path, effective_user, self.computer_name, process_id,
+                auto_created=True, detection_method="auto"
             )
-            
             if success:
                 logger.info(f"Auto-locked file: {file_path}")
             else:
                 logger.warning(f"Failed to auto-lock {file_path}: {message}")
-                
         except Exception as e:
             logger.error(f"Error handling file opened event for {file_path}: {e}")
     
-    def _handle_file_closed(self, file_path: str, process_id: int):
+    def _handle_file_closed(self, file_path: str, process_id: int, username: Optional[str]):
         """Handle when a CAD file is closed"""
         try:
-            success, message = self.lock_manager.remove_lock(file_path, self.user_name)
-            
+            effective_user = username or self.user_name
+            success, message = self.lock_manager.remove_lock(file_path, effective_user)
             if success:
                 logger.info(f"Auto-unlocked file: {file_path}")
             else:
                 logger.warning(f"Failed to auto-unlock {file_path}: {message}")
-                
         except Exception as e:
             logger.error(f"Error handling file closed event for {file_path}: {e}")
     

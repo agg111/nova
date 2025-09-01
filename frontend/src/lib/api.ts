@@ -3,7 +3,7 @@
  * Handles all communication with the Flask backend
  */
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:5000'
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:5050'
 
 export interface LockInfo {
   file_path: string
@@ -33,11 +33,23 @@ export interface CleanupResult {
  */
 export async function fetchLocks(): Promise<LockInfo[]> {
   try {
-    const response = await fetch(`${API_BASE_URL}/api/locks`)
+    console.log(`🔍 Fetching locks from: ${API_BASE_URL}/api/locks`)
+    const response = await fetch(`${API_BASE_URL}/api/locks`, {
+      method: 'GET',
+      headers: {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json',
+      },
+      mode: 'cors',
+      credentials: 'include'
+    })
+    console.log(`🔍 Locks response status: ${response.status} ${response.statusText}`)
     if (!response.ok) {
       throw new Error(`Failed to fetch locks: ${response.statusText}`)
     }
-    return await response.json()
+    const data = await response.json()
+    console.log('🔍 Locks data received:', data)
+    return data
   } catch (error) {
     console.error('Error fetching locks:', error)
     throw error
@@ -49,11 +61,23 @@ export async function fetchLocks(): Promise<LockInfo[]> {
  */
 export async function fetchStats(): Promise<LockStats> {
   try {
-    const response = await fetch(`${API_BASE_URL}/api/stats`)
+    console.log(`🔍 Fetching stats from: ${API_BASE_URL}/api/stats`)
+    const response = await fetch(`${API_BASE_URL}/api/stats`, {
+      method: 'GET',
+      headers: {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json',
+      },
+      mode: 'cors',
+      credentials: 'include'
+    })
+    console.log(`🔍 Stats response status: ${response.status} ${response.statusText}`)
     if (!response.ok) {
       throw new Error(`Failed to fetch stats: ${response.statusText}`)
     }
-    return await response.json()
+    const data = await response.json()
+    console.log('🔍 Stats data received:', data)
+    return data
   } catch (error) {
     console.error('Error fetching stats:', error)
     throw error

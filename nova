@@ -1,0 +1,490 @@
+#!/usr/bin/env python3
+"""
+Nova CLI - Command line interface for the Nova file lock management system.
+Usage: nova {start|stop|status|restart|logs}
+"""
+
+import os
+import sys
+import signal
+import subprocess
+import time
+import argparse
+import json
+import requests
+from pathlib import Path
+
+# Configuration
+NOVA_DIR = Path(__file__).parent.absolute()
+BACKEND_PORT = 5050
+FRONTEND_PORT = 3000
+PID_DIR = NOVA_DIR / ".nova_pids"
+BACKEND_PID_FILE = PID_DIR / "backend.pid"
+FRONTEND_PID_FILE = PID_DIR / "frontend.pid"
+
+def ensure_pid_dir():
+    """Create PID directory if it doesn't exist"""
+    PID_DIR.mkdir(exist_ok=True)
+
+def write_pid(pid_file: Path, pid: int):
+    """Write process ID to file"""
+    ensure_pid_dir()
+    with open(pid_file, 'w') as f:
+        f.write(str(pid))
+
+def read_pid(pid_file: Path) -> int:
+    """Read process ID from file"""
+    if pid_file.exists():
+        try:
+            with open(pid_file, 'r') as f:
+                return int(f.read().strip())
+        except (ValueError, FileNotFoundError):
+            return None
+    return None
+
+def is_process_running(pid: int) -> bool:
+    """Check if process is running"""
+    if pid is None:
+        return False
+    try:
+        os.kill(pid, 0)
+        return True
+    except OSError:
+        return False
+
+def kill_process(pid: int) -> bool:
+    """Kill process by PID"""
+    if pid is None:
+        return False
+    try:
+        os.kill(pid, signal.SIGTERM)
+        time.sleep(2)  # Give process time to terminate
+        if is_process_running(pid):
+            os.kill(pid, signal.SIGKILL)
+        return True
+    except OSError:
+        return False
+
+def cleanup_pid_file(pid_file: Path):
+    """Remove PID file if it exists"""
+    if pid_file.exists():
+        pid_file.unlink()
+
+def start_backend():
+    """Start the Nova backend service"""
+    backend_pid = read_pid(BACKEND_PID_FILE)
+    
+    if backend_pid and is_process_running(backend_pid):
+        print(f"✅ Nova already running (PID: {backend_pid})")
+        return True
+    
+    print("🚀 Starting Nova...")
+    
+    try:
+        # Start backend process
+        env = os.environ.copy()
+        env['NOVA_PORT'] = str(BACKEND_PORT)
+        
+        process = subprocess.Popen([
+            sys.executable, 'start_backend.py', '--port', str(BACKEND_PORT)
+        ], 
+        cwd=NOVA_DIR,
+        env=env,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True
+        )
+        
+        # Wait a moment to ensure process starts
+        time.sleep(2)
+        
+        if process.poll() is None:
+            write_pid(BACKEND_PID_FILE, process.pid)
+            print(f"✅ Nova started (PID: {process.pid}) on http://localhost:{BACKEND_PORT}")
+            return True
+        else:
+            print("❌ Failed to start Nova")
+            return False
+            
+    except Exception as e:
+        print(f"❌ Error starting Nova: {e}")
+        return False
+
+def start_frontend():
+    """Start the Nova frontend service"""
+    frontend_pid = read_pid(FRONTEND_PID_FILE)
+    
+    if frontend_pid and is_process_running(frontend_pid):
+        print(f"✅ Dashboard already running (PID: {frontend_pid})")
+        return True
+    
+    print("🚀 Starting Dashboard...")
+    
+    try:
+        frontend_dir = NOVA_DIR / "frontend"
+        
+        # Start frontend process
+        process = subprocess.Popen([
+            'npm', 'run', 'dev'
+        ],
+        cwd=frontend_dir,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True
+        )
+        
+        # Wait a moment to ensure process starts
+        time.sleep(3)
+        
+        if process.poll() is None:
+            write_pid(FRONTEND_PID_FILE, process.pid)
+            print(f"✅ Dashboard started (PID: {process.pid}) on http://localhost:{FRONTEND_PORT}")
+            return True
+        else:
+            print("❌ Failed to start Dashboard")
+            return False
+            
+    except Exception as e:
+        print(f"❌ Error starting Dashboard: {e}")
+        return False
+
+def stop_backend():
+    """Stop the Nova backend service"""
+    backend_pid = read_pid(BACKEND_PID_FILE)
+    
+    if not backend_pid or not is_process_running(backend_pid):
+        cleanup_pid_file(BACKEND_PID_FILE)
+        print("⚪ Nova not running")
+        return True
+    
+    print("🛑 Terminating Nova...")
+    
+    if kill_process(backend_pid):
+        cleanup_pid_file(BACKEND_PID_FILE)
+        print("✅ Nova stopped")
+        return True
+    else:
+        print("❌ Failed to stop Nova")
+        return False
+
+def stop_frontend():
+    """Stop the Nova frontend service"""
+    frontend_pid = read_pid(FRONTEND_PID_FILE)
+    
+    if not frontend_pid or not is_process_running(frontend_pid):
+        cleanup_pid_file(FRONTEND_PID_FILE)
+        print("⚪ Dashboard not running")
+        return True
+    
+    print("🛑 Stopping Dashboard...")
+    
+    if kill_process(frontend_pid):
+        cleanup_pid_file(FRONTEND_PID_FILE)
+        print("✅ Dashboard stopped")
+        return True
+    else:
+        print("❌ Failed to stop Dashboard")
+        return False
+
+def get_service_status():
+    """Get status of Nova services"""
+    backend_pid = read_pid(BACKEND_PID_FILE)
+    frontend_pid = read_pid(FRONTEND_PID_FILE)
+    
+    backend_running = backend_pid and is_process_running(backend_pid)
+    frontend_running = frontend_pid and is_process_running(frontend_pid)
+    
+    # Clean up stale PID files
+    if backend_pid and not backend_running:
+        cleanup_pid_file(BACKEND_PID_FILE)
+    if frontend_pid and not frontend_running:
+        cleanup_pid_file(FRONTEND_PID_FILE)
+    
+    print("📊 Nova Service Status:")
+    print("=" * 50)
+    
+    # Backend status
+    if backend_running:
+        print(f"🟢 Nova: RUNNING (PID: {backend_pid}) - http://localhost:{BACKEND_PORT}")
+        
+        # Try to get lock data
+        try:
+            response = requests.get(f"http://localhost:{BACKEND_PORT}/api/locks", timeout=2)
+            if response.status_code == 200:
+                locks = response.json()
+                print(f"   📁 Active Locks: {len(locks)}")
+                
+                if locks:
+                    print("   📋 Lock Details:")
+                    for i, lock in enumerate(locks[:5], 1):  # Show first 5 locks
+                        file_name = os.path.basename(lock.get('file_path', 'Unknown'))
+                        user = lock.get('user_name', 'Unknown')
+                        computer = lock.get('computer_name', 'Unknown')
+                        lock_time = lock.get('lock_time', 'Unknown')
+                        print(f"      {i}. {file_name} - {user}@{computer} ({lock_time})")
+                    
+                    if len(locks) > 5:
+                        print(f"      ... and {len(locks) - 5} more")
+            else:
+                print(f"   ⚠️  API Error: {response.status_code}")
+        except Exception as e:
+            print(f"   ⚠️  API Unreachable: {str(e)}")
+    else:
+        print("🔴 Nova: STOPPED")
+    
+    # Frontend status
+    if frontend_running:
+        print(f"🟢 Dashboard: RUNNING (PID: {frontend_pid}) - http://localhost:{FRONTEND_PORT}")
+    else:
+        print("🔴 Dashboard: STOPPED")
+    
+    print("=" * 50)
+    
+    if backend_running and frontend_running:
+        print("🎯 Dashboard: http://localhost:3000")
+    elif backend_running:
+        print("⚠️  Only Nova running - start Dashboard to access web interface")
+    elif frontend_running:
+        print("⚠️  Only Dashboard running - start Nova for data")
+    else:
+        print("💡 Run 'nova start' to start both services")
+
+def start_services():
+    """Start both backend and frontend services"""
+    backend_pid = read_pid(BACKEND_PID_FILE)
+    frontend_pid = read_pid(FRONTEND_PID_FILE)
+    
+    backend_already_running = backend_pid and is_process_running(backend_pid)
+    frontend_already_running = frontend_pid and is_process_running(frontend_pid)
+    
+    # If both are already running, just show status
+    if backend_already_running and frontend_already_running:
+        print("✅ Nova is already running")
+        print(f"🎯 Dashboard: http://localhost:{FRONTEND_PORT}")
+        print(f"🔧 API: http://localhost:{BACKEND_PORT}")
+        return
+    
+    print("🚀 Starting Nova services...")
+    
+    backend_ok = start_backend()
+    frontend_ok = start_frontend()
+    
+    # Only show "ready" message if we actually started something
+    if backend_ok and frontend_ok:
+        if not backend_already_running or not frontend_already_running:
+            print("\n🎉 Nova is ready!")
+            print(f"🎯 Dashboard: http://localhost:{FRONTEND_PORT}")
+            print(f"🔧 API: http://localhost:{BACKEND_PORT}")
+    elif backend_ok:
+        print("\n⚠️  Nova started, but Dashboard failed")
+    elif frontend_ok:
+        print("\n⚠️  Dashboard started, but Nova failed")
+    else:
+        print("\n❌ Failed to start Nova services")
+
+def stop_services():
+    """Stop both backend and frontend services"""
+    print("🛑 Stopping Nova services...")
+    
+    stop_backend()
+    stop_frontend()
+    
+    print("\n✅ Nova services stopped")
+
+def restart_services():
+    """Restart Nova services"""
+    print("🔄 Restarting Nova services...")
+    
+    stop_services()
+    time.sleep(2)
+    start_services()
+
+def show_logs():
+    """Show recent logs from services"""
+    print("📋 Nova Logs:")
+    print("=" * 50)
+    
+    backend_pid = read_pid(BACKEND_PID_FILE)
+    frontend_pid = read_pid(FRONTEND_PID_FILE)
+    
+    if backend_pid and is_process_running(backend_pid):
+        print("🔧 Nova Status: Running")
+    else:
+        print("🔧 Nova Status: Stopped")
+    
+    if frontend_pid and is_process_running(frontend_pid):
+        print("🎨 Dashboard Status: Running")
+    else:
+        print("🎨 Dashboard Status: Stopped")
+    
+    # Check for log files
+    frontend_log = NOVA_DIR / "frontend" / "dev.log"
+    if frontend_log.exists():
+        print("\n📄 Dashboard Log (last 10 lines):")
+        try:
+            with open(frontend_log, 'r') as f:
+                lines = f.readlines()
+                for line in lines[-10:]:
+                    print(f"   {line.rstrip()}")
+        except Exception as e:
+            print(f"   Error reading log: {e}")
+    
+    print("=" * 50)
+
+def delegate_to_backend_cli(args):
+    """Delegate file operations to the backend CLI"""
+    cmd = [sys.executable, '-m', 'backend.cli.main']
+    
+    # Set environment to use same locks directory as backend
+    env = os.environ.copy()
+    env['NOVA_LOCKS_DIR'] = str(NOVA_DIR / 'locks')
+    
+    # Map commands
+    if args.command == 'open':
+        # For 'open', first check if locked, then proceed
+        check_cmd = [sys.executable, '-m', 'backend.cli.main', 'check', args.file_path]
+        print(f"🔍 Checking lock status for: {args.file_path}")
+        subprocess.run(check_cmd, cwd=NOVA_DIR, env=env)
+        
+        # Then create lock
+        cmd.extend(['lock', args.file_path])
+        print(f"🔒 Creating lock for: {args.file_path}")
+        
+    elif args.command == 'lock':
+        cmd.extend(['lock', args.file_path])
+        
+    elif args.command == 'unlock':
+        cmd.extend(['unlock', args.file_path])
+        
+    elif args.command == 'unlock-all':
+        cmd.append('unlock-all')
+        
+    elif args.command == 'check':
+        cmd.extend(['check', args.file_path])
+        
+    elif args.command == 'cleanup':
+        cmd.extend(['cleanup', '--max-age', str(args.hours)])
+        
+    elif args.command == 'start-monitor':
+        cmd.append('start')
+        
+    elif args.command == 'stop-monitor':
+        cmd.append('stop')
+    
+    # Execute the backend command
+    try:
+        result = subprocess.run(cmd, cwd=NOVA_DIR, env=env, check=True)
+        return result.returncode == 0
+    except subprocess.CalledProcessError as e:
+        print(f"❌ Command failed: {e}")
+        return False
+    except Exception as e:
+        print(f"❌ Error executing command: {e}")
+        return False
+
+def main():
+    """Main CLI function"""
+    parser = argparse.ArgumentParser(
+        description="Nova CLI - File Lock Management System",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Service Management:
+  nova start                    Start Nova backend and frontend services
+  nova stop                     Stop Nova services
+  nova status                   Show service status and active locks
+  nova restart                  Restart Nova services
+  nova logs                     Show recent service logs
+
+File Operations:
+  nova open "path/to/file.sldprt"     Check lock and open file (creates manual lock)
+  nova lock "path/to/file.sldprt"     Create manual lock for file
+  nova unlock "path/to/file.sldprt"   Remove lock for file
+  nova check "path/to/file.sldprt"    Check lock status for file
+  nova unlock-all                     Remove ALL locks created by current user
+  nova cleanup [hours]                Remove stale locks older than hours (default: 24)
+
+Monitoring:
+  nova start-monitor            Start automatic background file monitoring
+  nova stop-monitor             Stop automatic background file monitoring
+
+Examples:
+  nova start                           # Start web dashboard and API
+  nova open "G:\\CAD\\part.sldprt"     # Check and lock a SolidWorks file
+  nova check "G:\\CAD\\part.sldprt"    # Check if file is locked
+  nova unlock-all                      # Remove all your locks
+  nova cleanup 48                      # Remove locks older than 48 hours
+  nova start-monitor                   # Auto-detect and lock open CAD files
+        """
+    )
+    
+    subparsers = parser.add_subparsers(dest='command', help='Available commands')
+    
+    # Service management commands
+    subparsers.add_parser('start', help='Start Nova backend and frontend services')
+    subparsers.add_parser('stop', help='Stop Nova backend and frontend services') 
+    subparsers.add_parser('status', help='Show service status and active locks')
+    subparsers.add_parser('restart', help='Restart Nova services')
+    subparsers.add_parser('logs', help='Show recent service logs')
+    
+    # File operation commands
+    open_parser = subparsers.add_parser('open', help='Check lock and open file (creates manual lock)')
+    open_parser.add_argument('file_path', help='Path to the file to open')
+    
+    lock_parser = subparsers.add_parser('lock', help='Create manual lock for file')
+    lock_parser.add_argument('file_path', help='Path to the file to lock')
+    
+    unlock_parser = subparsers.add_parser('unlock', help='Remove lock for file')
+    unlock_parser.add_argument('file_path', help='Path to the file to unlock')
+    
+    subparsers.add_parser('unlock-all', help='Remove ALL locks created by current user')
+    
+    check_parser = subparsers.add_parser('check', help='Check lock status for file')
+    check_parser.add_argument('file_path', help='Path to the file to check')
+    
+    cleanup_parser = subparsers.add_parser('cleanup', help='Remove stale locks older than specified hours')
+    cleanup_parser.add_argument('hours', nargs='?', type=int, default=24, help='Hours (default: 24)')
+    
+    # Monitoring commands
+    subparsers.add_parser('start-monitor', help='Start automatic background monitoring')
+    subparsers.add_parser('stop-monitor', help='Stop automatic background monitoring')
+    
+    if len(sys.argv) == 1:
+        parser.print_help()
+        sys.exit(1)
+    
+    args = parser.parse_args()
+    
+    if not args.command:
+        parser.print_help()
+        sys.exit(1)
+    
+    try:
+        # Service management commands
+        if args.command == 'start':
+            start_services()
+        elif args.command == 'stop':
+            stop_services()
+        elif args.command == 'status':
+            get_service_status()
+        elif args.command == 'restart':
+            restart_services()
+        elif args.command == 'logs':
+            show_logs()
+        
+        # File operation commands - delegate to backend CLI
+        elif args.command in ['open', 'lock', 'unlock', 'unlock-all', 'check', 'cleanup']:
+            delegate_to_backend_cli(args)
+        
+        # Monitoring commands - delegate to backend CLI  
+        elif args.command in ['start-monitor', 'stop-monitor']:
+            delegate_to_backend_cli(args)
+            
+    except KeyboardInterrupt:
+        print("\n\n⚠️  Operation cancelled by user")
+        sys.exit(1)
+    except Exception as e:
+        print(f"\n❌ Error: {e}")
+        sys.exit(1)
+
+if __name__ == "__main__":
+    main()

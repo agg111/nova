@@ -2,243 +2,201 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-A modern, open-source CAD file locking system for team collaboration. Prevent conflicts when multiple engineers work with CAD files simultaneously.
+A modern, intelligent CAD file locking system for team collaboration. Prevent conflicts when multiple engineers work with CAD files simultaneously.
 
 ## 🎯 What is Nova?
 
-Nova is a lightweight file locking system designed specifically for CAD files (SolidWorks, Inventor, AutoCAD, etc.). It prevents file conflicts by automatically creating locks when files are opened and removing them when closed.
+Nova automatically manages file locks for CAD applications (SolidWorks, AutoCAD, Inventor, etc.) to prevent conflicts in team environments. When someone opens a CAD file, Nova locks it. When they close it, Nova unlocks it. Simple, automatic, and reliable.
+
+**🔗 CADLock Compatible**: Nova uses the same network directory structure as CADLock, so teams can migrate seamlessly or run both systems side-by-side.
 
 ### Key Features
 
-- **🔒 Automatic Locking**: Monitors CAD processes and automatically locks/unlocks files
-- **🌐 Web Dashboard**: Real-time web interface to monitor all locks across the network
-- **⚡ Lightweight**: No complex setup or expensive licensing
-- **🛡️ Secure**: User-based permissions and stale lock cleanup
-- **📱 Modern UI**: Beautiful, responsive web dashboard with real-time updates
-- **🔧 Flexible**: Support for multiple CAD applications and file formats
+- **🤖 Intelligent Locking**: Auto-detects open CAD files and manages locks
+- **🌐 Web Dashboard**: Real-time monitoring of all locks across your team
+- **⚡ Zero Configuration**: Works out-of-the-box with sensible defaults
+- **🛡️ Secure**: User-based permissions and automatic stale lock cleanup
+- **📱 Modern UI**: Beautiful, responsive dashboard with live updates
+- **🔧 Universal**: Supports all major CAD applications and file formats
 
-## 🚀 Quick Start
+## ⚡ Quick Start
 
 ### Installation
 
 ```bash
-# Clone the repository
+# 1. Clone and setup
 git clone https://github.com/your-org/nova.git
 cd nova
+pip install -r requirements.txt
 
-# Install dependencies
-pip install -e .
+# 2. Make nova command globally available
+export PATH="$(pwd):$PATH"
+echo 'export PATH="$(pwd):$PATH"' >> ~/.zshrc  # or ~/.bashrc on Linux
 
-# Or install from PyPI (when available)
-pip install nova
+# 3. Start Nova services
+nova start
+
+# 4. Access dashboard
+open http://localhost:3000
 ```
 
-### Basic Usage
+That's it! Nova is now running and ready to manage your CAD files.
 
-#### 1. Start the Dashboard (Server)
+**Alternative (if PATH setup doesn't work):**
+```bash
+# Use python prefix for all commands
+python nova start
+python nova status
+python nova stop
+```
+
+### Core Commands
 
 ```bash
-# Start the web dashboard
-nova dashboard --lock-dir ./locks --host 0.0.0.0 --port 5000
+# Service Management
+nova start          # Start Nova and web dashboard
+nova stop           # Stop all services  
+nova status         # Show service status and active locks
+nova restart        # Restart services
+
+# File Operations
+nova open "file.sldprt"     # Check and lock file for editing
+nova lock "file.sldprt"     # Create manual lock
+nova unlock "file.sldprt"   # Remove lock
+nova check "file.sldprt"    # Check lock status
+nova unlock-all             # Remove all your locks
+nova cleanup [hours]        # Clean up old locks (default: 24h)
+
+# Monitoring (Optional)
+nova start-monitor   # Auto-detect and lock open CAD files
+nova stop-monitor    # Stop automatic monitoring
 ```
 
-Open your browser to `http://localhost:5000` to view the dashboard.
+**💡 Tip**: If `nova` command isn't found, either restart your terminal or use `python nova` instead of `nova`.
 
-#### 2. Start File Monitoring (Each CAD Computer)
+## 📊 Web Dashboard
+
+When Nova is running, access the dashboard at **http://localhost:3000**:
+
+- 📁 **Active Locks**: See all locked files across your team
+- 👥 **User Activity**: Track who has what files open
+- 📈 **Statistics**: Lock counts, file types, and usage patterns  
+- 🔧 **Management**: Remove locks, cleanup stale entries
+- 🚨 **Real-time**: Live updates as files are opened/closed
+
+## 🔧 Advanced Configuration
+
+### Custom Lock Directory
 
 ```bash
-# Start automatic file monitoring
-nova monitor --lock-dir ./locks
-
-# The monitor will automatically:
-# - Lock files when opened in CAD software
-# - Unlock files when closed
-# - Clean up stale locks
+# Set custom location (optional)
+export NOVA_LOCKS_DIR="/path/to/shared/locks"
+python nova start
 ```
 
-#### 3. Manual Operations
+### Team Setup
+
+Nova uses the **same network location as CADLock** for seamless compatibility:
+
+**Default Behavior by Platform:**
+
+**Windows (Production):**
+```
+G:\Shared drives\Cosmic\Engineering\50 - CAD Data\
+├── Locks\          ← CADLock's lock files  
+└── NovaLocks\      ← Nova's lock files (auto-created)
+```
+
+**macOS/Linux (Development):**
+```
+./locks/            ← Local development directory
+```
+
+**Windows Setup:**
+```bash
+# Ensure G: drive is mapped to your shared location
+net use G: \\server\shared-engineering
+python nova start  # Uses CADLock-compatible location automatically
+```
+
+**Custom Location (Optional):**
+```bash
+# macOS/Linux: Mount and set custom path
+export NOVA_LOCKS_DIR="/mnt/shared/nova-locks"
+python nova start
+
+# Cloud Storage: All team members use same cloud folder  
+export NOVA_LOCKS_DIR="~/GoogleDrive/NovaLocks"
+python nova start
+```
+
+## 🎯 How It Works
+
+```mermaid
+graph LR
+    A[CAD File Opens] --> B[Nova Detects]
+    B --> C[Creates Lock]
+    C --> D[Dashboard Updates]
+    
+    E[CAD File Closes] --> F[Nova Detects]
+    F --> G[Removes Lock]
+    G --> H[Dashboard Updates]
+    
+    I[Another User] --> J[Tries to Open]
+    J --> K{File Locked?}
+    K -->|Yes| L[Opens Read-Only]
+    K -->|No| M[Opens Normally + Lock]
+```
+
+## 🛠️ Supported Applications
+
+Nova automatically works with:
+
+**CAD Software:**
+- SolidWorks (.sldprt, .sldasm, .slddrw)
+- AutoCAD (.dwg, .dxf)
+- Autodesk Inventor (.ipt, .iam, .idw)
+- Fusion 360 (.f3d, .f3z)
+- Generic CAD (.step, .stp, .iges, .igs)
+
+**File Formats:**
+Nova supports 17+ CAD file extensions and can be easily extended for custom formats.
+
+## 📈 Enterprise Features
+
+- **CADLock Migration**: Drop-in replacement with same network directory structure
+- **Multi-user Support**: Concurrent access with proper conflict resolution
+- **Real-time Sync**: Instant updates across all connected clients  
+- **Automatic Cleanup**: Removes stale locks from crashed applications
+- **Usage Analytics**: Track file usage patterns and team productivity
+- **Security**: User-based permissions and access control
+- **Scalability**: Handles hundreds of concurrent users and thousands of files
+
+## 🔍 Troubleshooting
 
 ```bash
-# Manually lock a file
-nova lock "path/to/file.sldprt" --lock-dir ./locks
+# Check if Nova is running
+python nova status
 
-# Check if a file is locked
-nova check "path/to/file.sldprt" --lock-dir ./locks
+# View recent logs
+python nova logs
 
-# Unlock a file
-nova unlock "path/to/file.sldprt" --lock-dir ./locks
+# Clean up old locks
+python nova cleanup 1  # Remove locks older than 1 hour
 
-# Unlock all files for current user
-nova unlock-all --lock-dir ./locks
-
-# List all active locks
-nova list --lock-dir ./locks
-
-# Clean up stale locks
-nova cleanup --lock-dir ./locks --max-age 24
+# Reset everything
+python nova stop && python nova start
 ```
 
-## 🏗️ Architecture
+## 🤝 Contributing
 
-```
-Nova System
-├── Core Lock Manager
-│   ├── Lock creation/removal
-│   ├── Stale lock cleanup
-│   └── File validation
-├── File Monitor
-│   ├── Process monitoring
-│   ├── Automatic lock/unlock
-│   └── CAD process detection
-├── Web Dashboard
-│   ├── Real-time monitoring
-│   ├── Lock management
-│   └── Statistics
-└── CLI Interface
-    ├── Manual operations
-    ├── Monitoring control
-    └── System management
-```
-
-## 📋 Supported CAD Applications
-
-- **SolidWorks** (.sldprt, .sldasm, .slddrw)
-- **Inventor** (.ipt, .iam, .idw)
-- **AutoCAD** (.dwg, .dxf)
-- **Pro/Engineer & Creo** (.prt, .asm, .drw)
-- **Fusion 360** (.f3d, .f3z)
-- **Siemens NX** (.prt, .asm)
-- **CATIA** (.CATPart, .CATProduct)
-- **Neutral Formats** (.step, .stp, .iges, .igs)
-
-## 🌐 Network Setup
-
-### Single Network Share
-
-For small teams, use a shared network folder:
-
-```bash
-# On server computer
-nova dashboard --lock-dir "\\\\server\\shared\\nova\\locks"
-
-# On each CAD computer
-nova monitor --lock-dir "\\\\server\\shared\\nova\\locks"
-```
-
-### Multiple Locations
-
-For distributed teams, use cloud storage (Google Drive, Dropbox, etc.):
-
-```bash
-# All computers use the same cloud-synced folder
-nova monitor --lock-dir "C:\\GoogleDrive\\Nova\\locks"
-```
-
-## 🔧 Configuration
-
-### Environment Variables
-
-```bash
-# Dashboard secret key (optional)
-export NOVA_SECRET_KEY="your-secret-key"
-
-# Logging level
-export NOVA_LOG_LEVEL="INFO"
-```
-
-### Custom CAD Processes
-
-You can customize which processes to monitor:
-
-```python
-from nova.monitor import FileMonitor
-from nova.core import LockManager
-
-lock_manager = LockManager("./locks")
-monitor = FileMonitor(
-    lock_manager,
-    cad_processes=[
-        'SLDWORKS.exe',      # SolidWorks
-        'Inventor.exe',      # Inventor
-        'acad.exe',          # AutoCAD
-        'my-custom-cad.exe'  # Custom CAD application
-    ]
-)
-```
-
-## 📊 Web Dashboard Features
-
-- **Real-time Updates**: Live lock status with WebSocket connections
-- **Statistics**: Total locks, active users, computers, file types
-- **Filtering**: Filter by user, computer, or search file paths
-- **Lock Management**: Remove locks directly from the dashboard
-- **Responsive Design**: Works on desktop and mobile devices
-
-## 🛠️ Development
-
-### Project Structure
-
-```
-nova/
-├── core/           # Core locking functionality
-├── monitor/        # File monitoring system
-├── web/           # Web dashboard
-├── cli/           # Command-line interface
-└── tests/         # Test suite
-```
-
-### Running Tests
-
-```bash
-# Install development dependencies
-pip install -e ".[dev]"
-
-# Run tests
-pytest
-
-# Run with coverage
-pytest --cov=nova
-```
-
-### Contributing
+Nova is open-source! Contributions welcome:
 
 1. Fork the repository
 2. Create a feature branch
 3. Make your changes
-4. Add tests
-5. Submit a pull request
-
-## 🔒 Security Considerations
-
-- **User Permissions**: Only the user who created a lock can remove it
-- **Stale Lock Cleanup**: Automatic removal of locks older than 24 hours
-- **Process Validation**: Locks are tied to specific process IDs
-- **Network Security**: Dashboard can be secured with authentication
-
-## 📈 Performance
-
-- **Lightweight**: Minimal CPU and memory usage
-- **Efficient**: File system-based locking with JSON metadata
-- **Scalable**: Supports hundreds of concurrent users
-- **Fast**: Sub-second lock creation and removal
-
+4. Submit a pull request
 
 ## 📝 License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## 🙏 Acknowledgments
-
-- Inspired by the original [CADLock project](https://github.com/Cosmic-Robotics/CADLock)
-- Built with modern Python technologies
-- Uses Flask and Socket.IO for real-time web interface
-
-## 📞 Support
-
-- **Issues**: [GitHub Issues](https://github.com/your-org/nova/issues)
-- **Documentation**: [Read the Docs](https://nova.readthedocs.io/)
-- **Discussions**: [GitHub Discussions](https://github.com/your-org/nova/discussions)
-
----
-
-**Nova** - Making CAD collaboration simple and conflict-free! ⭐✨
+MIT License - see [LICENSE](LICENSE) for details.

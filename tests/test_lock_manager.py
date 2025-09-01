@@ -29,7 +29,7 @@ class TestLockManager(unittest.TestCase):
         shutil.rmtree(self.test_dir)
     
     def test_create_lock_success(self):
-        """Test successful lock creation with enhanced analytics"""
+        """Test successful lock creation with enhanced analytics in NovaLocks directory"""
         success, message = self.lock_manager.create_lock(
             self.test_file, "test_user", "TEST-PC", 1234, auto_created=False, detection_method="manual"
         )
@@ -53,6 +53,11 @@ class TestLockManager(unittest.TestCase):
         self.assertIsNotNone(lock_info.last_seen)
         self.assertIsNotNone(lock_info.lock_id)
         self.assertIsNotNone(lock_info.lock_file)
+        
+        # Verify lock file is created in the test directory
+        lock_files = list(Path(self.test_dir).glob("*.lock"))
+        self.assertEqual(len(lock_files), 1)
+        self.assertTrue(lock_files[0].exists())
     
     def test_create_lock_conflict(self):
         """Test lock creation when file is already locked"""
@@ -227,6 +232,35 @@ class TestLockManager(unittest.TestCase):
             
             # Should contain hash prefix
             self.assertTrue('_' in lock_filename)
+    
+    def test_novalocks_directory_structure(self):
+        """Test that Nova creates and uses NovaLocks directory structure"""
+        # Test that the lock manager works with NovaLocks directory naming
+        test_dir = tempfile.mkdtemp()
+        novalocks_dir = Path(test_dir) / "NovaLocks"
+        novalocks_dir.mkdir(exist_ok=True)
+        
+        try:
+            lock_manager = LockManager(str(novalocks_dir))
+            
+            # Create a lock
+            success, message = lock_manager.create_lock(
+                self.test_file, "test_user", "TEST-PC", 1234, auto_created=False, detection_method="manual"
+            )
+            
+            self.assertTrue(success)
+            
+            # Verify lock file is in NovaLocks directory
+            lock_files = list(novalocks_dir.glob("*.lock"))
+            self.assertEqual(len(lock_files), 1)
+            self.assertTrue(lock_files[0].exists())
+            
+            # Verify the directory name contains "NovaLocks"
+            self.assertIn("NovaLocks", str(novalocks_dir))
+            
+        finally:
+            # Clean up
+            shutil.rmtree(test_dir)
 
 if __name__ == '__main__':
     unittest.main()

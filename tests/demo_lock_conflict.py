@@ -18,8 +18,15 @@ def demo_lock_conflict():
     print("🔒 Nova Lock Conflict Demo")
     print("=" * 50)
     
-    # Initialize lock manager
-    lock_manager = LockManager('./locks')
+    # Show NovaLocks directory structure
+    print("📁 Nova uses dedicated NovaLocks directory:")
+    print("   G:\\Shared drives\\Cosmic\\Engineering\\50 - CAD Data\\")
+    print("   ├── Locks\\          ← CadLock's locks")
+    print("   └── NovaLocks\\      ← Nova's locks")
+    print()
+    
+    # Initialize lock manager with NovaLocks directory
+    lock_manager = LockManager('./NovaLocks')
     
     # Test file path
     test_file = "/shared/projects/engine_design.dwg"
