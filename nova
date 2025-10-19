@@ -275,6 +275,12 @@ def start_services():
             print("\n🎉 Nova is ready!")
             print(f"🎯 Dashboard: http://localhost:{FRONTEND_PORT}")
             print(f"🔧 API: http://localhost:{BACKEND_PORT}")
+            print("\n📝 Next steps:")
+            print(f"   1. Open http://localhost:{FRONTEND_PORT} to see the dashboard")
+            print("   2. Try locking a file: nova lock test.sldprt")
+            print("   3. Check lock status: nova status")
+            print("   4. View all commands: nova --help")
+            print("\n💡 Tip: Open a CAD file and Nova will auto-lock it!")
     elif backend_ok:
         print("\n⚠️  Nova started, but Dashboard failed")
     elif frontend_ok:
