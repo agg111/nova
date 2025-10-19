@@ -200,3 +200,10 @@ Nova is open-source! Contributions welcome:
 ## 📝 License
 
 MIT License - see [LICENSE](LICENSE) for details.
+
+## 🙏 Acknowledgments
+
+- Inspired by the original [CADLock project](https://github.com/Cosmic-Robotics/CADLock)
+
+
+**Nova** - Making CAD collaboration simple and conflict-free! ⭐✨
