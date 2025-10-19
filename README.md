@@ -197,13 +197,17 @@ Nova is open-source! Contributions welcome:
 3. Make your changes
 4. Submit a pull request
 
+## 📞 Support
+- For any new feature suggestion in Nova or bugs you come across, please create an issue: [GitHub Issues](https://github.com/agg111/nova/issues)
+
+
+## 🙏 Acknowledgments
+
+Inspired by the original [CADLock project](https://github.com/Cosmic-Robotics/CADLock)
+
 ## 📝 License
 
 MIT License - see [LICENSE](LICENSE) for details.
 
-## 🙏 Acknowledgments
-
-- Inspired by the original [CADLock project](https://github.com/Cosmic-Robotics/CADLock)
 
 
-**Nova** - Making CAD collaboration simple and conflict-free! ⭐✨
